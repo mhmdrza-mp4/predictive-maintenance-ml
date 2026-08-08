@@ -3,28 +3,31 @@ models.py
 ---------
 Model registry and factory.
 
-Responsibility of this module (single responsibility, per project architecture):
-    Construct fresh, unfitted scikit-learn-compatible regressors by name, so
-    that train.py, stacking, and hyperparameter-tuning code never hard-code
-    estimator setup in more than one place.
+Responsibilities of this module
+--------------------------------
+    Construct fresh, unfitted scikit-learn-compatible regressors by short
+    name, so that training, comparison, stacking, and hyperparameter-search
+    code never hard-code estimator construction in more than one place.
 
-Why the registry stores classes (not lambdas or instances):
-    Cross-validation and hyperparameter search both need a *fresh, unfitted*
-    estimator for every fold / trial. Storing the class itself and calling it
-    with **kwargs guarantees a brand-new instance each time get_model() is
-    invoked, AND lets a caller forward constructor arguments straight through
-    — e.g. get_model("ridge", alpha=0.5) — which an Optuna (or GridSearch)
-    loop needs in order to try different hyperparameter values without ever
-    touching this file again.
+Why the registry stores classes, not instances or lambdas
+---------------------------------------------------------
+Cross-validation and hyperparameter search both require a *fresh, unfitted*
+estimator for every fold or trial. Storing the class itself and instantiating
+it with **kwargs guarantees a brand-new object on each call to get_model(),
+and lets a caller forward constructor arguments directly — e.g.
+get_model("ridge", alpha=0.5) — without this module knowing about the search
+loop.
 
-Extending the registry:
-    Adding a new algorithm is a one-line change in _MODEL_REGISTRY (import the
-    class at the top, add its entry below). No other file in the project needs
-    to change.
+Extending the registry
+----------------------
+Adding an algorithm is a one-line change: import the class at the top of
+this file and register it in _MODEL_REGISTRY. No other module needs to change.
 
-Naming convention for registry keys: short, lowercase identifiers
-("linear", "ridge", "lasso", "svr", "random_forest", "xgboost") so callers
-and the registry stay aligned 1:1.
+Naming convention
+-----------------
+Registry keys are short, lowercase identifiers
+("linear", "ridge", "lasso", "svr", "random_forest", "xgboost") so that
+callers and the registry stay aligned one-to-one.
 """
 
 from __future__ import annotations
@@ -35,12 +38,11 @@ from sklearn.base import BaseEstimator
 from sklearn.linear_model import LinearRegression
 
 # ---------------------------------------------------------------------------
-# Registry: short name -> estimator class (not an instance!)
+# Registry: short name -> estimator class (never an instance)
 # ---------------------------------------------------------------------------
-# Currently registered: LinearRegression (the project baseline).
-# Additional estimators (Ridge, Lasso, SVR, RandomForest, XGBoost, …) are
-# added here as the modelling pipeline expands — import each class above and
-# register one line below.
+# Only LinearRegression is registered at present (the project baseline).
+# Additional estimators are added here as they are introduced into the
+# modelling pipeline — import the class above, then register one line below.
 _MODEL_REGISTRY: dict[str, type[BaseEstimator]] = {
     "linear": LinearRegression,
     # "ridge":         Ridge,
@@ -50,7 +52,7 @@ _MODEL_REGISTRY: dict[str, type[BaseEstimator]] = {
     # "xgboost":       XGBRegressor,
 }
 
-# Canonical baseline model for this project.
+# Default model used when no name is supplied to get_model().
 BASELINE_MODEL_NAME: str = "linear"
 
 

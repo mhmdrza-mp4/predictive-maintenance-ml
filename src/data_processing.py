@@ -1,20 +1,27 @@
 """
 data_processing.py
-------------------
-Phase 2 (PH.02) — Loading and schema validation for the raw AI4I 2020 dataset.
+-------------------
+Loading and schema validation for the raw AI4I 2020 dataset.
 
-Responsibility of this module (single responsibility, per project architecture):
-    1. Load the raw CSV exactly as downloaded from UCI.
-    2. Validate it against a strict Pandera schema *immediately* after loading,
-       before any feature engineering happens.
+Responsibilities of this module
+--------------------------------
+    1. Load the raw CSV exactly as downloaded from UCI, without modification.
+    2. Validate it against a strict Pandera schema immediately after loading,
+       before any feature engineering is applied.
 
-Why validate here and not later:
-    Pandera is the guardrail for the *file on disk* (data/raw/ai4i2020.csv) — it
-    answers "is this still the dataset I think it is?". Pydantic (used later in
-    api/schemas.py) guards a different boundary: a single user-typed prediction
-    request. If the raw CSV is ever replaced, edited, or corrupted, this schema
-    stops the pipeline right here with a clear error, instead of failing silently
-    three steps later inside feature engineering or training.
+Why validation happens here, not later
+-----------------------------------------
+Pandera guards the boundary of the file on disk (data/raw/ai4i2020.csv) —
+it answers the question "is this still the dataset I think it is?". This is
+a distinct concern from validating a single user-submitted prediction
+request at inference time, which belongs to a different layer and checks
+one row against business rules rather than a full dataset against its
+expected distribution.
+
+If the raw CSV is ever replaced, edited, or corrupted, this schema stops
+the pipeline immediately with a clear, itemised error — instead of failing
+silently several steps later, inside feature engineering or model training,
+where the root cause would be far harder to trace.
 """
 
 from __future__ import annotations
@@ -36,12 +43,15 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 # ---------------------------------------------------------------------------
 # Schema for the RAW file, as published by UCI (before any feature engineering)
 # ---------------------------------------------------------------------------
-# Ranges are chosen from the dataset's documented generative process
-# (DatasetDoc.txt): air temp ~300 K +/- 2 K, process temp = air temp + 10 K +/- 1 K,
-# torque ~40 Nm +/- 10 Nm with no negative values, tool wear in minutes.
-# The bounds below are deliberately generous (not just +/- a few sigma) so that
-# natural variation isn't flagged as invalid, while still catching real
-# corruption (e.g. a negative Kelvin temperature, a non-binary failure flag).
+# Value ranges follow the dataset's documented generative process
+# (DatasetDocs.txt): air temperature ~300 K +/- 2 K, process temperature =
+# air temperature + 10 K +/- 1 K, torque ~40 Nm +/- 10 Nm with no negative
+# values, tool wear expressed in whole minutes.
+#
+# Bounds are set deliberately wide (not just a few standard deviations) so
+# that normal sampling variation is never flagged as invalid, while still
+# catching genuine corruption — e.g. a negative Kelvin temperature or a
+# non-binary failure flag.
 # ---------------------------------------------------------------------------
 RAW_SCHEMA = DataFrameSchema(
     {
@@ -84,7 +94,7 @@ RAW_SCHEMA = DataFrameSchema(
 
 
 def load_raw(path: Path | str = RAW_DATA_PATH) -> pd.DataFrame:
-    """Load the raw AI4I 2020 CSV from disk.
+    """Load the raw AI4I 2020 CSV from disk, unmodified.
 
     Parameters
     ----------
@@ -110,14 +120,17 @@ def validate_raw(df: pd.DataFrame) -> pd.DataFrame:
     ------
     pandera.errors.SchemaErrors
         If the dataframe does not match the expected columns, dtypes, or
-        value ranges (lazy=True collects *all* violations at once).
+        value ranges (lazy=True collects all violations at once, rather
+        than stopping at the first one).
     pandera.errors.SchemaError
-        Fallback for older Pandera versions that raise single errors.
+        Fallback for older Pandera versions that raise a single error
+        instead of an aggregated SchemaErrors collection.
 
     Returns
     -------
     pd.DataFrame
-        The (possibly coerced) validated DataFrame.
+        The validated dataframe, with dtypes coerced where the schema
+        requests it.
     """
     return RAW_SCHEMA.validate(df, lazy=True)
 
@@ -125,8 +138,9 @@ def validate_raw(df: pd.DataFrame) -> pd.DataFrame:
 def load_and_validate(path: Path | str = RAW_DATA_PATH) -> pd.DataFrame:
     """Convenience wrapper: load the raw CSV and validate it in one call.
 
-    This is the function every other module (features.py, train.py) should
-    import, so the schema check can never accidentally be skipped.
+    This is the function every other module in the pipeline (e.g. features.py,
+    train.py) should import, so schema validation can never be accidentally
+    skipped by calling load_raw() directly.
     """
     df = load_raw(path)
     df = validate_raw(df)

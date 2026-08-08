@@ -1,52 +1,59 @@
 """
 features.py
------------
-Phase 2 (PH.02) — Feature engineering and proxy regression-target construction.
+------------
+Feature engineering and proxy regression-target construction for the
+AI4I 2020 predictive maintenance dataset.
 
-MOST IMPORTANT DECISION IN THIS FILE: the regression target.
-    AI4I 2020 is natively a classification dataset (binary "Machine failure").
-    There is no column for "time remaining until failure" (no true RUL label).
-    Per the project roadmap (Path 1 — same dataset, documented as a proxy):
+Regression target: an honest proxy, not a true RUL label
+----------------------------------------------------------
+AI4I 2020 is natively a binary classification dataset ("Machine failure").
+It contains no direct measurement of remaining useful life — there is no
+timestamp or degradation-time column. To support regression modelling on
+this dataset, a proxy target is derived instead:
 
-        rul_proxy_min = max(0, 200 - Tool wear [min])
+    rul_proxy_min = max(0, 200 - Tool wear [min])
 
-    200 min is the conservative (earliest) edge of the documented TWF risk
-    window [200, 240] (DatasetDoc.txt: "the tool will be replaced or fail at
-    a randomly selected tool wear time between 200-240 mins").
+The value 200 is the conservative (earliest) edge of the documented tool
+wear failure (TWF) risk window of 200-240 minutes (DatasetDocs.txt: "the
+tool will be replaced or fail at a randomly selected tool wear time between
+200-240 mins").
 
-    This is an HONEST PROXY, not a ground-truth Remaining Useful Life label:
+This target must be treated as a proxy, not a ground-truth Remaining Useful
+Life label:
     - It is a deterministic, monotonic transform of a single existing raw
       column, not an independently measured outcome.
-    - It only captures tool-wear degradation (TWF), not the other four
-      failure modes (HDF, PWF, OSF, RNF).
-    - If a "true" degradation-time regression target is required later, the
-      roadmap's Path 2 (NASA CMAPSS, which has a real RUL column) is the
-      correct dataset — not this one.
-    This caveat must be restated in the README and Model Card, per the roadmap.
+    - It only captures tool-wear degradation (TWF); it says nothing about
+      the other four failure modes present in this dataset (HDF, PWF, OSF,
+      RNF).
+    - A dataset with an actual measured degradation-time / RUL column
+      (e.g. NASA C-MAPSS) is the correct choice if a true RUL regression
+      target is required — this proxy should not be presented as one.
+This limitation should be restated wherever results derived from this
+target are reported (README, model card, evaluation write-ups).
 
-    Consequence for feature selection: because rul_proxy_min is a deterministic,
-    monotonic function of "Tool wear [min]" alone, that raw column is dropped
-    from the modelling features (see LEAKAGE_COLS below) — keeping it would let
-    any model "solve" the task by learning the identity y = 200 - x instead of
-    an actual pattern, making every downstream comparison (PH.03 baseline,
-    PH.06 tuning, PH.07 stacking) meaningless. wear_ratio and overstrain are
-    kept, since the roadmap asks for them explicitly and they are legitimate
-    physics-informed features in their own right, but note that both remain
-    strongly correlated with the target by construction (~-0.98 and ~-0.90
-    respectively, since both are built from tool wear too). This should be
-    flagged in the README/model card, and feature-importance results in PH.08
-    should be read with this in mind rather than as evidence of a "learned"
-    pattern.
+Consequence for feature selection: leakage
+--------------------------------------------
+Because rul_proxy_min is a deterministic, monotonic function of
+"Tool wear [min]" alone, that raw column is excluded from the modelling
+features (see LEAKAGE_COLS below). Keeping it would let any model "solve"
+the task by learning the identity y = 200 - x instead of an actual
+pattern, making any downstream model comparison meaningless.
 
-NOT implemented here: rolling windows / moving averages.
-    AI4I 2020 has no time-series structure to roll over: each row is an
-    independent snapshot (Product ID is unique per row, UDI is a row index,
-    not a timestamp — confirmed in DatasetDoc.txt and the roadmap's own
-    domain notes, which is also why TimeSeriesSplit was deliberately rejected
-    for this project). A "moving average" would silently average across
-    unrelated machines, which is a technically wrong claim to ship. The
-    ratio/interaction features below are used instead, in line with the
-    roadmap's own examples (temp_diff, power, wear_ratio).
+wear_ratio and overstrain are kept, as they are legitimate physics-informed
+features in their own right — but both remain strongly correlated with the
+target by construction (~-0.98 and ~-0.90 respectively), since both are
+themselves derived from tool wear. This should be flagged wherever feature
+importance is reported: a high importance score for either feature reflects
+its construction, not necessarily an independently "learned" pattern.
+
+Not implemented here: rolling windows / moving averages
+-----------------------------------------------------------
+AI4I 2020 has no time-series structure to roll over — each row is an
+independent snapshot (Product ID is unique per row; UDI is a row index, not
+a timestamp; confirmed in DatasetDocs.txt). A moving average would silently
+average across unrelated machines, which would be a technically incorrect
+transformation. Ratio and interaction features are used instead
+(temp_diff, power_w, wear_ratio, overstrain).
 """
 
 from __future__ import annotations
@@ -81,7 +88,7 @@ except ImportError:
     )
 
 # ---------------------------------------------------------------------------
-# Constants derived directly from DatasetDoc.txt (not arbitrary guesses)
+# Constants derived directly from DatasetDocs.txt (not arbitrary guesses)
 # ---------------------------------------------------------------------------
 
 # TWF risk window start: "a randomly selected tool wear time between 200-240 mins"
@@ -133,7 +140,7 @@ def add_temp_diff(df: pd.DataFrame) -> pd.DataFrame:
 
     This difference is the exact quantity that drives HDF (Heat Dissipation
     Failure): HDF triggers when temp_diff < 8.6 K AND rotational speed
-    < 1380 rpm (per DatasetDoc.txt).
+    < 1380 rpm (per DatasetDocs.txt).
     """
     df = df.copy()
     df["temp_diff"] = df["Process temperature [K]"] - df["Air temperature [K]"]
@@ -268,14 +275,14 @@ def run_pipeline(
     raw_path: Path | str | None = None,
     output_path: Path = PROCESSED_PATH,
 ) -> pd.DataFrame:
-    """End-to-end PH.02 pipeline:
+    """End-to-end feature engineering pipeline:
       1. Load & validate raw CSV (Pandera)
       2. Engineer features + proxy target
       3. Persist to data/processed/
       4. Print summary statistics
     """
     print("=" * 60)
-    print("PH.02 – Feature Engineering pipeline")
+    print("Feature Engineering Pipeline")
     print("=" * 60)
 
     # 1. Load + validate
